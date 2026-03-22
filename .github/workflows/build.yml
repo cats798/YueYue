@@ -5,12 +5,15 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: write   # 允许创建 Release
+
 jobs:
   build:
     runs-on: macos-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
 
       - name: Install XcodeGen
         run: brew install xcodegen
@@ -40,8 +43,8 @@ jobs:
           cp -r build/Build/Products/Release-iphoneos/YueYue.app Payload/
           zip -r YueYue.ipa Payload
 
-      - name: Upload IPA
-        uses: actions/upload-artifact@v4
+      - name: Upload IPA as artifact
+        uses: actions/upload-artifact@v3
         with:
           name: YueYue.ipa
           path: YueYue.ipa
@@ -53,5 +56,6 @@ jobs:
           files: YueYue.ipa
           tag_name: v1.0.0
           body: "自动构建的 IPA，可直接用巨魔安装"
+          overwrite: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
