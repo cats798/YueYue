@@ -29,10 +29,6 @@ targets:
         INFOPLIST_FILE: YueYue/Resources/Info.plist
     dependencies:
       - package: SwiftSoup
-    scheme:
-      configVariants: [Debug, Release]
-      testTargets:
-        - name: YueYueTests
     info:
       path: YueYue/Resources/Info.plist
       properties:
