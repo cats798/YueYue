@@ -1,0 +1,20 @@
+import SwiftUI
+import CoreData
+
+@main
+struct YueYueApp: App {
+    let persistenceController = PersistenceController.shared
+
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+                .environment(\.managedObjectContext, persistenceController.container.viewContext)
+        }
+    }
+}
+
+struct ContentView: View {
+    var body: some View {
+        BookshelfView()
+    }
+}

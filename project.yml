@@ -1,0 +1,47 @@
+name: YueYue
+options:
+  bundleIdPrefix: com.yourcompany
+  deploymentTarget:
+    iOS: "16.0"
+  xcodeVersion: "14.0"
+settings:
+  base:
+    INFOPLIST_FILE: YueYue/Resources/Info.plist
+    PRODUCT_BUNDLE_IDENTIFIER: com.yourcompany.yueyue
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: ""
+    CODE_SIGNING_REQUIRED: NO
+    CODE_SIGNING_ALLOWED: NO
+    ENABLE_BITCODE: NO
+targets:
+  YueYue:
+    type: application
+    platform: iOS
+    sources:
+      - path: YueYue
+        excludes:
+          - "**/*.xcdatamodeld"
+          - "Resources/Info.plist"
+      - path: YueYue/Resources/YueYue.xcdatamodeld
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.yourcompany.yueyue
+        INFOPLIST_FILE: YueYue/Resources/Info.plist
+    dependencies:
+      - package: SwiftSoup
+    scheme:
+      configVariants: [Debug, Release]
+      testTargets:
+        - name: YueYueTests
+    info:
+      path: YueYue/Resources/Info.plist
+      properties:
+        UILaunchScreen: {}
+        UIApplicationSupportsMultipleScenes: false
+        UIUserInterfaceStyle: Automatic
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+packages:
+  SwiftSoup:
+    url: https://github.com/scinfu/SwiftSoup.git
+    from: 2.6.1
