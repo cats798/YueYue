@@ -33,9 +33,10 @@ struct ReaderView: View {
         }
         
         let fetcher = ContentFetcher()
-        let url = "\(rule.baseURL)/chapter/1" // 简化，实际应获取真实章节URL
+        // 注意：实际应动态获取章节URL，这里仅为示例
+        let chapterURL = "\(rule.baseURL)/chapter/1" 
         do {
-            content = try await fetcher.fetchNovelContent(url: url, rule: rule.contentRule)
+            content = try await fetcher.fetchNovelContent(url: chapterURL, rule: rule.contentRule)
             isLoading = false
         } catch {
             content = "加载失败：\(error.localizedDescription)"
