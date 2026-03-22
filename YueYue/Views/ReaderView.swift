@@ -32,9 +32,8 @@ struct ReaderView: View {
             return
         }
         
-        // 示例：简单模拟获取内容，实际需根据源规则解析章节列表和正文
         let fetcher = ContentFetcher()
-        let url = "\(rule.baseURL)/chapter/1" // 简化处理，实际应获取真实章节URL
+        let url = "\(rule.baseURL)/chapter/1" // 简化，实际应获取真实章节URL
         do {
             content = try await fetcher.fetchNovelContent(url: url, rule: rule.contentRule)
             isLoading = false
@@ -43,32 +42,4 @@ struct ReaderView: View {
             isLoading = false
         }
     }
-}
-
-// 临时规则模型，后续可独立文件
-struct Rule: Codable {
-    let name: String
-    let type: String
-    let baseURL: String
-    let searchRule: SearchRule
-    let chapterRule: ChapterRule
-    let contentRule: ContentRule
-}
-
-struct SearchRule: Codable {
-    let url: String
-    let list: String
-    let title: String
-    let urlAttr: String
-}
-
-struct ChapterRule: Codable {
-    let list: String
-    let title: String
-    let urlAttr: String
-}
-
-struct ContentRule: Codable {
-    let selector: String
-    let text: String
 }
