@@ -1,9 +1,0 @@
-.DS_Store
-*.xcuserstate
-*.xcuserdatad/
-*.xcworkspace/
-*.xcodeproj/
-build/
-derivedData/
-*.ipa
-*.app
