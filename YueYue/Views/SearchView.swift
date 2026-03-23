@@ -8,6 +8,8 @@ struct SearchView: View {
     @State private var searchResults: [SearchResult] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
+    @State private var debugHtml: String?
+    @State private var showDebug = false
     @Environment(\.managedObjectContext) private var viewContext
     @Environment(\.dismiss) private var dismiss
     
@@ -25,9 +27,17 @@ struct SearchView: View {
             if isLoading {
                 ProgressView()
             } else if let error = errorMessage {
-                Text(error)
-                    .foregroundColor(.red)
-                    .padding()
+                VStack {
+                    Text(error)
+                        .foregroundColor(.red)
+                        .padding()
+                    if debugHtml != nil {
+                        Button("查看调试信息") {
+                            showDebug = true
+                        }
+                        .font(.caption)
+                    }
+                }
             } else {
                 List(searchResults) { result in
                     Button {
@@ -46,11 +56,21 @@ struct SearchView: View {
         }
         .navigationTitle("搜索")
         .navigationBarTitleDisplayMode(.inline)
-        .alert("搜索失败", isPresented: .constant(errorMessage != nil), actions: {
-            Button("确定") { errorMessage = nil }
-        }, message: {
-            Text(errorMessage ?? "")
-        })
+        .sheet(isPresented: $showDebug) {
+            NavigationView {
+                ScrollView {
+                    Text(debugHtml ?? "无数据")
+                        .font(.system(.body, design: .monospaced))
+                        .padding()
+                }
+                .navigationTitle("HTML 调试")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("关闭") { showDebug = false }
+                    }
+                }
+            }
+        }
     }
     
     private func search() {
@@ -61,14 +81,16 @@ struct SearchView: View {
         }
         isLoading = true
         errorMessage = nil
+        debugHtml = nil
         Task {
             do {
-                let results = try await SearchService.search(keyword: keyword, rule: rule)
+                let (results, html) = try await SearchService.searchWithHtml(keyword: keyword, rule: rule)
                 await MainActor.run {
                     searchResults = results
                     isLoading = false
                     if results.isEmpty {
                         errorMessage = "未找到相关小说"
+                        debugHtml = html
                     }
                 }
             } catch {
@@ -105,20 +127,38 @@ struct SearchResult: Identifiable {
 }
 
 class SearchService {
-    static func search(keyword: String, rule: Rule) async throws -> [SearchResult] {
+    static func searchWithHtml(keyword: String, rule: Rule) async throws -> ([SearchResult], String) {
         let encodedKeyword = keyword.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        let urlString = rule.baseURL + String(format: rule.searchRule.url, encodedKeyword)
+        
+        // 构建完整 URL
+        let urlString = rule.baseURL + rule.searchRule.url
         guard let url = URL(string: urlString) else {
             throw URLError(.badURL)
         }
         
-        // 调试：打印请求 URL
-        print("搜索URL: \(urlString)")
+        // 准备请求
+        var request = URLRequest(url: url)
+        request.setValue("Mozilla/5.0 (Windows NT 5.2) AppleWebKit/534.30 (KHTML, like Gecko) Chrome/12.0.742.122 Safari/534.30", forHTTPHeaderField: "User-Agent")
+        request.setValue("zh-CN,zh;q=0.9", forHTTPHeaderField: "Accept-Language")
         
-        let html = try await fetchHTML(url: url)
+        // 判断请求方法
+        let method = rule.searchRule.method?.uppercased() ?? "GET"
+        request.httpMethod = method
         
-        // 调试：打印 HTML 开头（可选）
-        // print("HTML: \(html.prefix(500))")
+        if method == "POST", let bodyTemplate = rule.searchRule.body {
+            let bodyString = bodyTemplate.replacingOccurrences(of: "%@", with: encodedKeyword)
+            request.httpBody = bodyString.data(using: .utf8)
+            request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        } else {
+            // GET 请求，拼接 URL
+            let fullURLString = urlString + (urlString.contains("?") ? "&" : "?") + String(format: rule.searchRule.url, encodedKeyword)
+            request.url = URL(string: fullURLString)
+        }
+        
+        let (data, _) = try await URLSession.shared.data(for: request)
+        guard let html = String(data: data, encoding: .utf8) else {
+            throw NSError(domain: "SearchService", code: 1, userInfo: [NSLocalizedDescriptionKey: "网页编码不是 UTF-8"])
+        }
         
         let doc = try SwiftSoup.parse(html)
         let elements = try doc.select(rule.searchRule.list)
@@ -130,16 +170,10 @@ class SearchService {
             let urlAttr = rule.searchRule.urlAttr
             let href = try titleElem?.attr(urlAttr) ?? ""
             let fullUrl = URL(string: href, relativeTo: URL(string: rule.baseURL))?.absoluteString ?? href
-            results.append(SearchResult(title: title, url: fullUrl, author: nil, coverData: nil))
+            if !title.isEmpty && !fullUrl.isEmpty {
+                results.append(SearchResult(title: title, url: fullUrl, author: nil, coverData: nil))
+            }
         }
-        return results
-    }
-    
-    private static func fetchHTML(url: URL) async throws -> String {
-        let (data, _) = try await URLSession.shared.data(from: url)
-        guard let html = String(data: data, encoding: .utf8) else {
-            throw NSError(domain: "SearchService", code: 1, userInfo: [NSLocalizedDescriptionKey: "网页编码不是 UTF-8"])
-        }
-        return html
+        return (results, html)
     }
 }
