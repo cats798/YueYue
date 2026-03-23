@@ -14,9 +14,7 @@ class ContentFetcher {
     }
     
     private func fetchHTML(url: String) async throws -> String {
-        guard let url = URL(string: url) else {
-            throw URLError(.badURL)
-        }
+        guard let url = URL(string: url) else { throw URLError(.badURL) }
         let (data, _) = try await URLSession.shared.data(from: url)
         guard let html = String(data: data, encoding: .utf8) else {
             throw NSError(domain: "ContentFetcher", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid encoding"])
