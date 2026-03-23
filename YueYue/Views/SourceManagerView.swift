@@ -12,6 +12,7 @@ struct SourceManagerView: View {
     @State private var showQuickAdd = false
     @State private var quickURL = ""
     @State private var alertMessage: String? = nil
+    @State private var testingSourceID: NSManagedObjectID? = nil  // 正在测试的源ID
     
     var body: some View {
         List {
@@ -22,11 +23,28 @@ struct SourceManagerView: View {
                     .listRowBackground(Color.clear)
             } else {
                 ForEach(sources) { source in
-                    VStack(alignment: .leading) {
-                        Text(source.name ?? "未命名")
-                            .font(.headline)
-                        Text(source.type ?? "未知类型")
-                            .font(.caption)
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text(source.name ?? "未命名")
+                                .font(.headline)
+                            Text(source.type ?? "未知类型")
+                                .font(.caption)
+                        }
+                        Spacer()
+                        // 测试按钮
+                        Button {
+                            testLatency(for: source)
+                        } label: {
+                            if testingSourceID == source.objectID {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle())
+                                    .scaleEffect(0.8)
+                            } else {
+                                Image(systemName: "network")
+                                    .foregroundColor(.blue)
+                            }
+                        }
+                        .buttonStyle(BorderlessButtonStyle())
                     }
                     .listRowBackground(
                         RoundedRectangle(cornerRadius: 16)
@@ -125,9 +143,49 @@ struct SourceManagerView: View {
             alertMessage = "保存失败：\(error.localizedDescription)"
         }
     }
+    
+    // 测试延迟
+    private func testLatency(for source: Source) {
+        guard let ruleData = source.ruleData,
+              let rule = try? JSONDecoder().decode(Rule.self, from: ruleData),
+              let baseURL = URL(string: rule.baseURL) else {
+            alertMessage = "无法获取源地址"
+            return
+        }
+        
+        testingSourceID = source.objectID
+        
+        Task {
+            let start = Date()
+            do {
+                // 发起一个 HEAD 请求，测量响应时间
+                var request = URLRequest(url: baseURL)
+                request.httpMethod = "HEAD"
+                request.timeoutInterval = 5
+                let (_, response) = try await URLSession.shared.data(for: request)
+                let elapsed = Date().timeIntervalSince(start) * 1000  // 毫秒
+                let httpResponse = response as? HTTPURLResponse
+                let status = httpResponse?.statusCode ?? 0
+                
+                await MainActor.run {
+                    testingSourceID = nil
+                    if status >= 200 && status < 400 {
+                        alertMessage = String(format: "延迟：%.0f ms", elapsed)
+                    } else {
+                        alertMessage = "响应异常（HTTP \(status)）"
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    testingSourceID = nil
+                    alertMessage = "连接失败：\(error.localizedDescription)"
+                }
+            }
+        }
+    }
 }
 
-// 用于 Alert 的扩展，让 String 符合 Identifiable
+// 用于 Alert 的扩展
 extension String: @retroactive Identifiable {
     public var id: String { self }
 }
