@@ -1,0 +1,22 @@
+{
+  "www.biquge365.net": {
+    "name": "笔趣阁365",
+    "type": "novel",
+    "baseURL": "https://www.biquge365.net",
+    "searchRule": {
+      "url": "/search?q=%@",
+      "list": ".result-list .item",
+      "title": "h3 a",
+      "urlAttr": "a@href"
+    },
+    "chapterRule": {
+      "list": "#list dd a",
+      "title": "a",
+      "urlAttr": "a@href"
+    },
+    "contentRule": {
+      "selector": "#content",
+      "text": "text"
+    }
+  }
+}
