@@ -54,7 +54,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: YueYue.ipa
-          tag_name: v1.0.0
+          tag_name: v1.0.1
           body: "自动构建的 IPA，可直接用巨魔安装"
           overwrite: true
         env:
