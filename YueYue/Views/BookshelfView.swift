@@ -9,7 +9,6 @@ struct BookshelfView: View {
     private var books: FetchedResults<Book>
     
     @State private var showSourcePicker = false
-    @State private var selectedSource: Source? = nil
     @State private var navigationPath = NavigationPath()
     
     let columns = [GridItem(.adaptive(minimum: 120), spacing: 20)]
@@ -17,32 +16,47 @@ struct BookshelfView: View {
     var body: some View {
         NavigationStack(path: $navigationPath) {
             ScrollView {
-                LazyVGrid(columns: columns, spacing: 20) {
-                    ForEach(books) { book in
-                        NavigationLink(value: book) {
-                            GlassCard {
-                                VStack {
-                                    if let cover = book.cover, let uiImage = UIImage(data: cover) {
-                                        Image(uiImage: uiImage)
-                                            .resizable()
-                                            .scaledToFit()
-                                            .frame(height: 160)
-                                            .cornerRadius(12)
-                                    } else {
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .fill(Color.gray.opacity(0.3))
-                                            .frame(height: 160)
+                if books.isEmpty {
+                    VStack(spacing: 20) {
+                        Image(systemName: "books.vertical")
+                            .font(.system(size: 60))
+                            .foregroundColor(.secondary)
+                        Text("书架空空如也")
+                            .font(.title2)
+                        Text("点击右上角 + → 搜索书籍，添加小说或漫画")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(.top, 100)
+                } else {
+                    LazyVGrid(columns: columns, spacing: 20) {
+                        ForEach(books) { book in
+                            NavigationLink(value: book) {
+                                GlassCard {
+                                    VStack {
+                                        if let cover = book.cover, let uiImage = UIImage(data: cover) {
+                                            Image(uiImage: uiImage)
+                                                .resizable()
+                                                .scaledToFit()
+                                                .frame(height: 160)
+                                                .cornerRadius(12)
+                                        } else {
+                                            RoundedRectangle(cornerRadius: 12)
+                                                .fill(Color.gray.opacity(0.3))
+                                                .frame(height: 160)
+                                        }
+                                        Text(book.title ?? "未知")
+                                            .font(.caption)
+                                            .lineLimit(1)
                                     }
-                                    Text(book.title ?? "未知")
-                                        .font(.caption)
-                                        .lineLimit(1)
                                 }
                             }
+                            .buttonStyle(PlainButtonStyle())
                         }
-                        .buttonStyle(PlainButtonStyle())
                     }
+                    .padding()
                 }
-                .padding()
             }
             .background(LinearGradient(colors: [.blue.opacity(0.3), .purple.opacity(0.2)], startPoint: .top, endPoint: .bottom))
             .navigationTitle("已阅")
@@ -66,18 +80,21 @@ struct BookshelfView: View {
             }
             .sheet(isPresented: $showSourcePicker) {
                 SourcePickerView { source in
-                    selectedSource = source
                     navigationPath.append(source)
                 }
             }
             .navigationDestination(for: Source.self) { source in
                 SearchView(source: source)
             }
+            .onReceive(NotificationCenter.default.publisher(for: .sourceAdded)) { notification in
+                if let source = notification.object as? Source {
+                    navigationPath.append(source)
+                }
+            }
         }
     }
 }
 
-// 源选择器
 struct SourcePickerView: View {
     @Environment(\.managedObjectContext) private var viewContext
     @FetchRequest(
@@ -89,16 +106,27 @@ struct SourcePickerView: View {
     
     var body: some View {
         NavigationView {
-            List(sources) { source in
-                Button(source.name ?? "未命名") {
-                    onSelect(source)
-                    dismiss()
+            if sources.isEmpty {
+                Text("请先在源管理中添加快捷源")
+                    .foregroundColor(.secondary)
+                    .navigationTitle("选择源")
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("关闭") { dismiss() }
+                        }
+                    }
+            } else {
+                List(sources) { source in
+                    Button(source.name ?? "未命名") {
+                        onSelect(source)
+                        dismiss()
+                    }
                 }
-            }
-            .navigationTitle("选择源")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
+                .navigationTitle("选择源")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("取消") { dismiss() }
+                    }
                 }
             }
         }
