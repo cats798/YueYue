@@ -130,71 +130,57 @@ class SearchService {
     static func searchWithHtml(keyword: String, rule: Rule) async throws -> ([SearchResult], String) {
         let encodedKeyword = keyword.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
         
-        // 使用 URLComponents 安全构建绝对 URL
         guard let baseURL = URL(string: rule.baseURL) else {
             throw URLError(.badURL)
         }
-        var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: true)
-        // 拼接路径：确保不出现双斜杠
-        let path = (components?.path ?? "") + rule.searchRule.url
-        components?.path = path
+        let searchURL = baseURL.appendingPathComponent(rule.searchRule.url)
         
-        guard let url = components?.url else {
-            throw URLError(.badURL)
-        }
+        var request = URLRequest(url: searchURL)
+        request.httpMethod = rule.searchRule.method?.uppercased() ?? "GET"
         
-        // 准备请求
-        var request = URLRequest(url: url)
-        request.setValue("Mozilla/5.0 (Windows NT 5.2) AppleWebKit/534.30 (KHTML, like Gecko) Chrome/12.0.742.122 Safari/534.30", forHTTPHeaderField: "User-Agent")
-        request.setValue("zh-CN,zh;q=0.9", forHTTPHeaderField: "Accept-Language")
+        // 添加更多真实浏览器头
+        request.setValue("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
+        request.setValue("text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8", forHTTPHeaderField: "Accept")
+        request.setValue("zh-CN,zh;q=0.9,en;q=0.8", forHTTPHeaderField: "Accept-Language")
+        request.setValue(baseURL.absoluteString, forHTTPHeaderField: "Referer")
+        request.setValue("keep-alive", forHTTPHeaderField: "Connection")
         
-        // 请求方法
-        let method = rule.searchRule.method?.uppercased() ?? "GET"
-        request.httpMethod = method
-        
-        if method == "POST", let bodyTemplate = rule.searchRule.body {
+        if request.httpMethod == "POST", let bodyTemplate = rule.searchRule.body {
             let bodyString = bodyTemplate.replacingOccurrences(of: "%@", with: encodedKeyword)
             request.httpBody = bodyString.data(using: .utf8)
             request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        } else if method == "GET" {
-            // GET 请求时，可以添加查询参数（这里根据实际需要，示例为 q 参数）
-            // 实际上 biquge365 是 POST，所以此分支几乎不会执行，但保留通用逻辑
-            var queryItems = components?.queryItems ?? []
-            queryItems.append(URLQueryItem(name: "q", value: encodedKeyword))
-            components?.queryItems = queryItems
-            request.url = components?.url
         }
         
-        // 可选调试信息（可通过 Xcode 控制台查看）
-        print("请求方法: \(method)")
-        print("请求 URL: \(request.url?.absoluteString ?? "")")
+        // 调试输出（可在Xcode控制台查看）
+        print("Search URL: \(request.url?.absoluteString ?? "")")
+        print("Method: \(request.httpMethod ?? "")")
         if let body = request.httpBody, let bodyStr = String(data: body, encoding: .utf8) {
-            print("请求 Body: \(bodyStr)")
+            print("Body: \(bodyStr)")
         }
         
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw URLError(.badServerResponse)
         }
-        print("响应状态码: \(httpResponse.statusCode)")
+        print("Status: \(httpResponse.statusCode)")
+        
+        // 如果重定向，打印位置
+        if let location = httpResponse.allHeaderFields["Location"] as? String {
+            print("Redirect to: \(location)")
+        }
         
         guard let html = String(data: data, encoding: .utf8) else {
             throw NSError(domain: "SearchService", code: 1, userInfo: [NSLocalizedDescriptionKey: "网页编码不是 UTF-8"])
         }
         
-        // 可选：打印 HTML 开头用于调试
-        // print(html.prefix(500))
-        
+        // 解析
         let doc = try SwiftSoup.parse(html)
         let elements = try doc.select(rule.searchRule.list)
-        
         var results: [SearchResult] = []
         for element in elements {
             let titleElem = try element.select(rule.searchRule.title).first()
             let title = try titleElem?.text() ?? ""
-            let urlAttr = rule.searchRule.urlAttr
-            let href = try titleElem?.attr(urlAttr) ?? ""
-            // 处理相对链接
+            let href = try titleElem?.attr(rule.searchRule.urlAttr) ?? ""
             let fullUrl = URL(string: href, relativeTo: baseURL)?.absoluteString ?? href
             if !title.isEmpty && !fullUrl.isEmpty {
                 results.append(SearchResult(title: title, url: fullUrl, author: nil, coverData: nil))
