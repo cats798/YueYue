@@ -8,7 +8,7 @@ struct Rule: Codable {
     let searchRule: SearchRule
     let chapterRule: ChapterRule
     let contentRule: ContentRule
-    let discover: DiscoverRule?  // 可选，用于分类发现
+    let discover: DiscoverRule?  // 可选
 }
 
 struct SearchRule: Codable {
