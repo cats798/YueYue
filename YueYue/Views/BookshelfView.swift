@@ -23,7 +23,7 @@ struct BookshelfView: View {
                             .foregroundColor(.secondary)
                         Text("书架空空如也")
                             .font(.title2)
-                        Text("点击右上角 + → 搜索书籍，添加小说或漫画")
+                        Text("点击右上角 + → 聚合搜索，添加小说或漫画")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -67,7 +67,10 @@ struct BookshelfView: View {
                         NavigationLink(destination: SourceManagerView()) {
                             Label("管理源", systemImage: "gear")
                         }
-                        Button("搜索书籍") {
+                        NavigationLink(destination: AggregateSearchView()) {
+                            Label("聚合搜索", systemImage: "magnifyingglass")
+                        }
+                        Button("单源搜索") {
                             showSourcePicker = true
                         }
                     } label: {
