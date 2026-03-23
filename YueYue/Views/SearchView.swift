@@ -130,9 +130,16 @@ class SearchService {
     static func searchWithHtml(keyword: String, rule: Rule) async throws -> ([SearchResult], String) {
         let encodedKeyword = keyword.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
         
-        // 构建完整 URL
-        let urlString = rule.baseURL + rule.searchRule.url
-        guard let url = URL(string: urlString) else {
+        // 使用 URLComponents 安全构建绝对 URL
+        guard let baseURL = URL(string: rule.baseURL) else {
+            throw URLError(.badURL)
+        }
+        var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: true)
+        // 拼接路径：确保不出现双斜杠
+        let path = (components?.path ?? "") + rule.searchRule.url
+        components?.path = path
+        
+        guard let url = components?.url else {
             throw URLError(.badURL)
         }
         
@@ -141,7 +148,7 @@ class SearchService {
         request.setValue("Mozilla/5.0 (Windows NT 5.2) AppleWebKit/534.30 (KHTML, like Gecko) Chrome/12.0.742.122 Safari/534.30", forHTTPHeaderField: "User-Agent")
         request.setValue("zh-CN,zh;q=0.9", forHTTPHeaderField: "Accept-Language")
         
-        // 判断请求方法
+        // 请求方法
         let method = rule.searchRule.method?.uppercased() ?? "GET"
         request.httpMethod = method
         
@@ -149,16 +156,34 @@ class SearchService {
             let bodyString = bodyTemplate.replacingOccurrences(of: "%@", with: encodedKeyword)
             request.httpBody = bodyString.data(using: .utf8)
             request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        } else {
-            // GET 请求，拼接 URL
-            let fullURLString = urlString + (urlString.contains("?") ? "&" : "?") + String(format: rule.searchRule.url, encodedKeyword)
-            request.url = URL(string: fullURLString)
+        } else if method == "GET" {
+            // GET 请求时，可以添加查询参数（这里根据实际需要，示例为 q 参数）
+            // 实际上 biquge365 是 POST，所以此分支几乎不会执行，但保留通用逻辑
+            var queryItems = components?.queryItems ?? []
+            queryItems.append(URLQueryItem(name: "q", value: encodedKeyword))
+            components?.queryItems = queryItems
+            request.url = components?.url
         }
         
-        let (data, _) = try await URLSession.shared.data(for: request)
+        // 可选调试信息（可通过 Xcode 控制台查看）
+        print("请求方法: \(method)")
+        print("请求 URL: \(request.url?.absoluteString ?? "")")
+        if let body = request.httpBody, let bodyStr = String(data: body, encoding: .utf8) {
+            print("请求 Body: \(bodyStr)")
+        }
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+        print("响应状态码: \(httpResponse.statusCode)")
+        
         guard let html = String(data: data, encoding: .utf8) else {
             throw NSError(domain: "SearchService", code: 1, userInfo: [NSLocalizedDescriptionKey: "网页编码不是 UTF-8"])
         }
+        
+        // 可选：打印 HTML 开头用于调试
+        // print(html.prefix(500))
         
         let doc = try SwiftSoup.parse(html)
         let elements = try doc.select(rule.searchRule.list)
@@ -169,7 +194,8 @@ class SearchService {
             let title = try titleElem?.text() ?? ""
             let urlAttr = rule.searchRule.urlAttr
             let href = try titleElem?.attr(urlAttr) ?? ""
-            let fullUrl = URL(string: href, relativeTo: URL(string: rule.baseURL))?.absoluteString ?? href
+            // 处理相对链接
+            let fullUrl = URL(string: href, relativeTo: baseURL)?.absoluteString ?? href
             if !title.isEmpty && !fullUrl.isEmpty {
                 results.append(SearchResult(title: title, url: fullUrl, author: nil, coverData: nil))
             }
