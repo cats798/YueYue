@@ -11,24 +11,32 @@ struct SourceManagerView: View {
     @State private var showAddSource = false
     @State private var showQuickAdd = false
     @State private var quickURL = ""
+    @State private var alertMessage: String? = nil
     
     var body: some View {
         List {
-            ForEach(sources) { source in
-                VStack(alignment: .leading) {
-                    Text(source.name ?? "未命名")
-                        .font(.headline)
-                    Text(source.type ?? "未知类型")
-                        .font(.caption)
+            if sources.isEmpty {
+                Text("暂无源，点击右上角 + 添加")
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .listRowBackground(Color.clear)
+            } else {
+                ForEach(sources) { source in
+                    VStack(alignment: .leading) {
+                        Text(source.name ?? "未命名")
+                            .font(.headline)
+                        Text(source.type ?? "未知类型")
+                            .font(.caption)
+                    }
+                    .listRowBackground(
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(.ultraThinMaterial)
+                            .padding(.vertical, 4)
+                    )
+                    .listRowSeparator(.hidden)
                 }
-                .listRowBackground(
-                    RoundedRectangle(cornerRadius: 16)
-                        .fill(.ultraThinMaterial)
-                        .padding(.vertical, 4)
-                )
-                .listRowSeparator(.hidden)
+                .onDelete(perform: deleteSources)
             }
-            .onDelete(perform: deleteSources)
         }
         .listStyle(.plain)
         .background(LinearGradient(colors: [.blue.opacity(0.3), .purple.opacity(0.2)], startPoint: .top, endPoint: .bottom))
@@ -54,7 +62,6 @@ struct SourceManagerView: View {
                         .disableAutocorrection(true)
                     Button("添加") {
                         addSourceFromURL(quickURL)
-                        showQuickAdd = false
                     }
                     .disabled(quickURL.isEmpty)
                 }
@@ -66,6 +73,9 @@ struct SourceManagerView: View {
                 }
             }
         }
+        .alert(item: $alertMessage) { message in
+            Alert(title: Text("提示"), message: Text(message), dismissButton: .default(Text("确定")))
+        }
     }
     
     private func deleteSources(offsets: IndexSet) {
@@ -76,11 +86,17 @@ struct SourceManagerView: View {
     }
     
     private func addSourceFromURL(_ urlString: String) {
-        guard let url = URL(string: urlString), let host = url.host else { return }
-        // 加载内置规则
+        guard let url = URL(string: urlString), let host = url.host else {
+            alertMessage = "无效的网址"
+            return
+        }
+        
         guard let builtinPath = Bundle.main.path(forResource: "BuiltinSources", ofType: "json"),
               let data = try? Data(contentsOf: URL(fileURLWithPath: builtinPath)),
-              let builtin = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+              let builtin = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            alertMessage = "无法加载内置规则"
+            return
+        }
         
         var ruleJSON: [String: Any]? = nil
         for (domain, rule) in builtin {
@@ -90,16 +106,28 @@ struct SourceManagerView: View {
             }
         }
         guard let rule = ruleJSON else {
-            // 简单提示，实际可以增加 Alert
-            print("未找到匹配规则")
+            alertMessage = "未找到匹配的规则，暂不支持该网站"
             return
         }
+        
         let newSource = Source(context: viewContext)
         newSource.name = rule["name"] as? String ?? host
         newSource.type = rule["type"] as? String ?? "novel"
         if let ruleData = try? JSONSerialization.data(withJSONObject: rule) {
             newSource.ruleData = ruleData
         }
-        try? viewContext.save()
+        
+        do {
+            try viewContext.save()
+            NotificationCenter.default.post(name: .sourceAdded, object: newSource)
+            showQuickAdd = false
+        } catch {
+            alertMessage = "保存失败：\(error.localizedDescription)"
+        }
     }
+}
+
+// 用于 Alert 的扩展，让 String 符合 Identifiable
+extension String: @retroactive Identifiable {
+    public var id: String { self }
 }
