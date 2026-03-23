@@ -7,6 +7,7 @@ struct SearchView: View {
     @State private var keyword = ""
     @State private var searchResults: [SearchResult] = []
     @State private var isLoading = false
+    @State private var errorMessage: String?
     @Environment(\.managedObjectContext) private var viewContext
     @Environment(\.dismiss) private var dismiss
     
@@ -23,6 +24,10 @@ struct SearchView: View {
             
             if isLoading {
                 ProgressView()
+            } else if let error = errorMessage {
+                Text(error)
+                    .foregroundColor(.red)
+                    .padding()
             } else {
                 List(searchResults) { result in
                     Button {
@@ -41,21 +46,34 @@ struct SearchView: View {
         }
         .navigationTitle("搜索")
         .navigationBarTitleDisplayMode(.inline)
+        .alert("搜索失败", isPresented: .constant(errorMessage != nil), actions: {
+            Button("确定") { errorMessage = nil }
+        }, message: {
+            Text(errorMessage ?? "")
+        })
     }
     
     private func search() {
         guard let ruleData = source.ruleData,
-              let rule = try? JSONDecoder().decode(Rule.self, from: ruleData) else { return }
+              let rule = try? JSONDecoder().decode(Rule.self, from: ruleData) else {
+            errorMessage = "源规则无效"
+            return
+        }
         isLoading = true
+        errorMessage = nil
         Task {
             do {
                 let results = try await SearchService.search(keyword: keyword, rule: rule)
                 await MainActor.run {
                     searchResults = results
                     isLoading = false
+                    if results.isEmpty {
+                        errorMessage = "未找到相关小说"
+                    }
                 }
             } catch {
                 await MainActor.run {
+                    errorMessage = "搜索失败：\(error.localizedDescription)"
                     isLoading = false
                 }
             }
@@ -88,11 +106,23 @@ struct SearchResult: Identifiable {
 
 class SearchService {
     static func search(keyword: String, rule: Rule) async throws -> [SearchResult] {
-        let urlString = rule.baseURL + String(format: rule.searchRule.url, keyword.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")
-        guard let url = URL(string: urlString) else { throw URLError(.badURL) }
+        let encodedKeyword = keyword.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        let urlString = rule.baseURL + String(format: rule.searchRule.url, encodedKeyword)
+        guard let url = URL(string: urlString) else {
+            throw URLError(.badURL)
+        }
+        
+        // 调试：打印请求 URL
+        print("搜索URL: \(urlString)")
+        
         let html = try await fetchHTML(url: url)
+        
+        // 调试：打印 HTML 开头（可选）
+        // print("HTML: \(html.prefix(500))")
+        
         let doc = try SwiftSoup.parse(html)
         let elements = try doc.select(rule.searchRule.list)
+        
         var results: [SearchResult] = []
         for element in elements {
             let titleElem = try element.select(rule.searchRule.title).first()
@@ -107,6 +137,9 @@ class SearchService {
     
     private static func fetchHTML(url: URL) async throws -> String {
         let (data, _) = try await URLSession.shared.data(from: url)
-        return String(data: data, encoding: .utf8) ?? ""
+        guard let html = String(data: data, encoding: .utf8) else {
+            throw NSError(domain: "SearchService", code: 1, userInfo: [NSLocalizedDescriptionKey: "网页编码不是 UTF-8"])
+        }
+        return html
     }
 }
