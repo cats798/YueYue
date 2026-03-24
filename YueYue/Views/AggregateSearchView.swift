@@ -10,8 +10,8 @@ struct AggregateSearchView: View {
     
     @State private var keyword = ""
     @State private var isLoading = false
-    @State private var selectedSourceResults: [NSManagedObjectID: [SearchResult]] = [:]
-    @State private var sourceErrors: [NSManagedObjectID: String] = [:]
+    @State private var resultsBySource: [NSManagedObjectID: [SearchResult]] = [:]
+    @State private var errorMessages: [String] = []
     
     var body: some View {
         VStack {
@@ -29,7 +29,7 @@ struct AggregateSearchView: View {
             } else {
                 List {
                     ForEach(sources) { source in
-                        if let results = selectedSourceResults[source.objectID], !results.isEmpty {
+                        if let results = resultsBySource[source.objectID], !results.isEmpty {
                             Section(header: Text(source.name ?? "未知源")) {
                                 ForEach(results) { result in
                                     Button {
@@ -45,19 +45,15 @@ struct AggregateSearchView: View {
                                     }
                                 }
                             }
-                        } else if let error = sourceErrors[source.objectID] {
-                            Section(header: Text(source.name ?? "未知源")) {
-                                Text("搜索失败: \(error)")
-                                    .foregroundColor(.red)
-                                    .font(.caption)
-                            }
-                        } else if selectedSourceResults[source.objectID] != nil {
+                        } else if resultsBySource[source.objectID] == nil {
+                            // 尚未搜索该源，不显示
+                            EmptyView()
+                        } else {
                             Section(header: Text(source.name ?? "未知源")) {
                                 Text("未找到结果")
                                     .foregroundColor(.secondary)
                             }
                         }
-                        // 否则尚未搜索，不显示该源
                     }
                 }
                 .listStyle(InsetGroupedListStyle())
@@ -68,30 +64,27 @@ struct AggregateSearchView: View {
     
     private func search() {
         isLoading = true
-        selectedSourceResults = [:]
-        sourceErrors = [:]
+        resultsBySource = [:]
+        errorMessages = []
         
         Task {
-            await withTaskGroup(of: (NSManagedObjectID, [SearchResult]?, String?).self) { group in
+            await withTaskGroup(of: (NSManagedObjectID, [SearchResult], String?).self) { group in
                 for source in sources {
                     group.addTask {
                         do {
-                            let ruleData = source.ruleData!
-                            let rule = try JSONDecoder().decode(Rule.self, from: ruleData)
-                            let (results, _) = try await SearchService.searchWithHtml(keyword: keyword, rule: rule)
+                            let (results, _) = try await SearchService.searchWithHtml(keyword: keyword, source: source)
                             return (source.objectID, results, nil)
                         } catch {
-                            return (source.objectID, nil, error.localizedDescription)
+                            return (source.objectID, [], error.localizedDescription)
                         }
                     }
                 }
                 
                 for await (id, results, error) in group {
                     await MainActor.run {
-                        if let results = results {
-                            selectedSourceResults[id] = results
-                        } else if let error = error {
-                            sourceErrors[id] = error
+                        resultsBySource[id] = results
+                        if let error = error {
+                            errorMessages.append(error)
                         }
                     }
                 }
@@ -109,6 +102,6 @@ struct AggregateSearchView: View {
         book.currentChapter = 0
         book.progress = 0
         try? viewContext.save()
-        // 可添加提示，比如展示一个短暂的toast或简单alert
+        // 可选：显示提示
     }
 }
