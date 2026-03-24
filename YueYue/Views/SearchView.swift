@@ -128,70 +128,80 @@ struct SearchResult: Identifiable {
 
 class SearchService {
     static func searchWithHtml(keyword: String, rule: Rule) async throws -> ([SearchResult], String) {
-        await MainActor.run { LogManager.shared.add("开始搜索: \(keyword), 源: \(rule.name)", level: .info) }
-        
-        let encodedKeyword = keyword.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        guard let baseURL = URL(string: rule.baseURL) else {
-            await MainActor.run { LogManager.shared.add("无效的 baseURL: \(rule.baseURL)", level: .error) }
+    await MainActor.run { LogManager.shared.add("开始搜索: \(keyword), 源: \(rule.name)", level: .info) }
+    
+    let encodedKeyword = keyword.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+    guard let baseURL = URL(string: rule.baseURL) else {
+        await MainActor.run { LogManager.shared.add("无效的 baseURL: \(rule.baseURL)", level: .error) }
+        throw URLError(.badURL)
+    }
+    
+    // 正确构建搜索 URL
+    let searchURL: URL
+    if rule.searchRule.url.hasPrefix("http") {
+        guard let url = URL(string: rule.searchRule.url) else {
             throw URLError(.badURL)
         }
-        let searchURL = baseURL.appendingPathComponent(rule.searchRule.url)
-        
-        var request = URLRequest(url: searchURL)
-        request.httpMethod = rule.searchRule.method?.uppercased() ?? "GET"
-        
-        request.setValue("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
-        request.setValue("text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8", forHTTPHeaderField: "Accept")
-        request.setValue("zh-CN,zh;q=0.9,en;q=0.8", forHTTPHeaderField: "Accept-Language")
-        request.setValue(baseURL.absoluteString, forHTTPHeaderField: "Referer")
-        
-        if request.httpMethod == "POST", let bodyTemplate = rule.searchRule.body {
-            let bodyString = bodyTemplate.replacingOccurrences(of: "%@", with: encodedKeyword)
-            request.httpBody = bodyString.data(using: .utf8)
-            request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        } else if request.httpMethod == "GET" {
-            let paramName = rule.searchRule.body ?? "q"
-            var components = URLComponents(url: searchURL, resolvingAgainstBaseURL: true)
-            var queryItems = components?.queryItems ?? []
-            queryItems.append(URLQueryItem(name: paramName, value: encodedKeyword))
-            components?.queryItems = queryItems
-            request.url = components?.url
-        }
-        
-        // 记录请求详情
-        await MainActor.run {
-            LogManager.shared.add("请求方法: \(request.httpMethod ?? "")", level: .debug)
-            LogManager.shared.add("请求 URL: \(request.url?.absoluteString ?? "")", level: .debug)
-            if let body = request.httpBody, let bodyStr = String(data: body, encoding: .utf8) {
-                LogManager.shared.add("请求 Body: \(bodyStr)", level: .debug)
-            }
-        }
-        
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            await MainActor.run { LogManager.shared.add("无效的HTTP响应", level: .error) }
-            throw URLError(.badServerResponse)
-        }
-        await MainActor.run { LogManager.shared.add("响应状态码: \(httpResponse.statusCode)", level: .info) }
-        
-        guard let html = String(data: data, encoding: .utf8) else {
-            await MainActor.run { LogManager.shared.add("网页编码不是 UTF-8", level: .error) }
-            throw NSError(domain: "SearchService", code: 1, userInfo: [NSLocalizedDescriptionKey: "网页编码不是 UTF-8"])
-        }
-        
-        let doc = try SwiftSoup.parse(html)
-        let elements = try doc.select(rule.searchRule.list)
-        var results: [SearchResult] = []
-        for element in elements {
-            let titleElem = try element.select(rule.searchRule.title).first()
-            let title = try titleElem?.text() ?? ""
-            let href = try titleElem?.attr(rule.searchRule.urlAttr) ?? ""
-            let fullUrl = URL(string: href, relativeTo: baseURL)?.absoluteString ?? href
-            if !title.isEmpty && !fullUrl.isEmpty {
-                results.append(SearchResult(title: title, url: fullUrl, author: nil, coverData: nil))
-            }
-        }
-        await MainActor.run { LogManager.shared.add("找到 \(results.count) 个搜索结果", level: .info) }
-        return (results, html)
+        searchURL = url
+    } else {
+        searchURL = baseURL.appendingPathComponent(rule.searchRule.url)
     }
+    
+    var request = URLRequest(url: searchURL)
+    request.httpMethod = rule.searchRule.method?.uppercased() ?? "GET"
+    
+    // 设置请求头...
+    request.setValue("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
+    request.setValue("text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8", forHTTPHeaderField: "Accept")
+    request.setValue("zh-CN,zh;q=0.9,en;q=0.8", forHTTPHeaderField: "Accept-Language")
+    request.setValue(baseURL.absoluteString, forHTTPHeaderField: "Referer")
+    
+    if request.httpMethod == "POST", let bodyTemplate = rule.searchRule.body {
+        let bodyString = bodyTemplate.replacingOccurrences(of: "%@", with: encodedKeyword)
+        request.httpBody = bodyString.data(using: .utf8)
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+    } else if request.httpMethod == "GET" {
+        let paramName = rule.searchRule.body ?? "q"
+        var components = URLComponents(url: searchURL, resolvingAgainstBaseURL: true)
+        var queryItems = components?.queryItems ?? []
+        queryItems.append(URLQueryItem(name: paramName, value: encodedKeyword))
+        components?.queryItems = queryItems
+        request.url = components?.url
+    }
+    
+    // 日志记录...
+    await MainActor.run {
+        LogManager.shared.add("请求方法: \(request.httpMethod ?? "")", level: .debug)
+        LogManager.shared.add("请求 URL: \(request.url?.absoluteString ?? "")", level: .debug)
+        if let body = request.httpBody, let bodyStr = String(data: body, encoding: .utf8) {
+            LogManager.shared.add("请求 Body: \(bodyStr)", level: .debug)
+        }
+    }
+    
+    let (data, response) = try await URLSession.shared.data(for: request)
+    guard let httpResponse = response as? HTTPURLResponse else {
+        await MainActor.run { LogManager.shared.add("无效的HTTP响应", level: .error) }
+        throw URLError(.badServerResponse)
+    }
+    await MainActor.run { LogManager.shared.add("响应状态码: \(httpResponse.statusCode)", level: .info) }
+    
+    guard let html = String(data: data, encoding: .utf8) else {
+        await MainActor.run { LogManager.shared.add("网页编码不是 UTF-8", level: .error) }
+        throw NSError(domain: "SearchService", code: 1, userInfo: [NSLocalizedDescriptionKey: "网页编码不是 UTF-8"])
+    }
+    
+    let doc = try SwiftSoup.parse(html)
+    let elements = try doc.select(rule.searchRule.list)
+    var results: [SearchResult] = []
+    for element in elements {
+        let titleElem = try element.select(rule.searchRule.title).first()
+        let title = try titleElem?.text() ?? ""
+        let href = try titleElem?.attr(rule.searchRule.urlAttr) ?? ""
+        let fullUrl = URL(string: href, relativeTo: baseURL)?.absoluteString ?? href
+        if !title.isEmpty && !fullUrl.isEmpty {
+            results.append(SearchResult(title: title, url: fullUrl, author: nil, coverData: nil))
+        }
+    }
+    await MainActor.run { LogManager.shared.add("找到 \(results.count) 个搜索结果", level: .info) }
+    return (results, html)
 }
