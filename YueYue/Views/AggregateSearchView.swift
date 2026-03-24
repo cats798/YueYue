@@ -71,8 +71,12 @@ struct AggregateSearchView: View {
             await withTaskGroup(of: (NSManagedObjectID, [SearchResult], String?).self) { group in
                 for source in sources {
                     group.addTask {
+                        guard let ruleData = source.ruleData,
+                              let rule = try? JSONDecoder().decode(Rule.self, from: ruleData) else {
+                            return (source.objectID, [], "源规则无效")
+                        }
                         do {
-                            let (results, _) = try await SearchService.searchWithHtml(keyword: keyword, source: source)
+                            let (results, _) = try await SearchService.searchWithHtml(keyword: keyword, rule: rule)
                             return (source.objectID, results, nil)
                         } catch {
                             return (source.objectID, [], error.localizedDescription)
