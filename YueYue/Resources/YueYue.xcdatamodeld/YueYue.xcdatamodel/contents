@@ -13,10 +13,17 @@
         <attribute name="name" optional="YES" attributeType="String"/>
         <attribute name="ruleData" optional="YES" attributeType="Binary"/>
         <attribute name="type" optional="YES" attributeType="String"/>
+        <!-- 新增属性 -->
+        <attribute name="searchURL" optional="YES" attributeType="String"/>
+        <attribute name="searchMethod" optional="YES" attributeType="String"/>
+        <attribute name="searchBody" optional="YES" attributeType="String"/>
+        <attribute name="listSelector" optional="YES" attributeType="String"/>
+        <attribute name="titleSelector" optional="YES" attributeType="String"/>
+        <attribute name="linkSelector" optional="YES" attributeType="String"/>
         <relationship name="books" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="Book" inverseName="source" inverseEntity="Book"/>
     </entity>
     <elements>
         <element name="Book" positionX="-63" positionY="-18" width="128" height="149"/>
-        <element name="Source" positionX="-54" positionY="9" width="128" height="104"/>
+        <element name="Source" positionX="-54" positionY="9" width="128" height="194"/>
     </elements>
 </model>
