@@ -147,14 +147,27 @@ class SearchService {
             request.httpBody = bodyString.data(using: .utf8)
             request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         } else if request.httpMethod == "GET" {
+            let paramName = rule.searchRule.body ?? "q"
             var components = URLComponents(url: searchURL, resolvingAgainstBaseURL: true)
             var queryItems = components?.queryItems ?? []
-            queryItems.append(URLQueryItem(name: rule.searchRule.body ?? "q", value: encodedKeyword))
+            queryItems.append(URLQueryItem(name: paramName, value: encodedKeyword))
             components?.queryItems = queryItems
             request.url = components?.url
         }
         
-        let (data, _) = try await URLSession.shared.data(for: request)
+        // 调试信息（可在Xcode控制台查看）
+        print("请求方法: \(request.httpMethod ?? "")")
+        print("请求 URL: \(request.url?.absoluteString ?? "")")
+        if let body = request.httpBody, let bodyStr = String(data: body, encoding: .utf8) {
+            print("请求 Body: \(bodyStr)")
+        }
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+        print("响应状态码: \(httpResponse.statusCode)")
+        
         guard let html = String(data: data, encoding: .utf8) else {
             throw NSError(domain: "SearchService", code: 1, userInfo: [NSLocalizedDescriptionKey: "网页编码不是 UTF-8"])
         }
