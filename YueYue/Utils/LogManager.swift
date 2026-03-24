@@ -6,9 +6,8 @@ class LogManager: ObservableObject {
     static let shared = LogManager()
     @Published var logs: [LogEntry] = []
     private let maxLogs = 200
-    private let queue = DispatchQueue(label: "logmanager.queue")
     
-    private struct LogEntry: Identifiable {
+    struct LogEntry: Identifiable {
         let id = UUID()
         let timestamp: Date
         let message: String
@@ -27,26 +26,14 @@ class LogManager: ObservableObject {
     
     func add(_ message: String, level: LogLevel = .info) {
         let entry = LogEntry(timestamp: Date(), message: message, level: level)
-        queue.async { [weak self] in
-            guard let self = self else { return }
-            var newLogs = self.logs
-            newLogs.append(entry)
-            if newLogs.count > self.maxLogs {
-                newLogs = Array(newLogs.suffix(self.maxLogs))
-            }
-            DispatchQueue.main.async {
-                self.logs = newLogs
-            }
+        logs.append(entry)
+        if logs.count > maxLogs {
+            logs.removeFirst(logs.count - maxLogs)
         }
     }
     
     func clear() {
-        queue.async { [weak self] in
-            guard let self = self else { return }
-            DispatchQueue.main.async {
-                self.logs.removeAll()
-            }
-        }
+        logs.removeAll()
     }
     
     func export() -> String {
