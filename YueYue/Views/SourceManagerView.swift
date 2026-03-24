@@ -147,118 +147,125 @@ struct SourceManagerView: View {
     }
     
     private func detectSearchForm(from url: URL) async throws -> Rule {
-        await MainActor.run { LogManager.shared.add("开始探测源: \(url.absoluteString)", level: .info) }
-        
-        let (data, response) = try await URLSession.shared.data(from: url)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            await MainActor.run { LogManager.shared.add("无效的HTTP响应", level: .error) }
-            throw NSError(domain: "Detect", code: 1, userInfo: [NSLocalizedDescriptionKey: "无效的HTTP响应"])
+    await MainActor.run { LogManager.shared.add("开始探测源: \(url.absoluteString)", level: .info) }
+    
+    let (data, response) = try await URLSession.shared.data(from: url)
+    guard let httpResponse = response as? HTTPURLResponse else {
+        await MainActor.run { LogManager.shared.add("无效的HTTP响应", level: .error) }
+        throw NSError(domain: "Detect", code: 1, userInfo: [NSLocalizedDescriptionKey: "无效的HTTP响应"])
+    }
+    await MainActor.run { LogManager.shared.add("响应状态码: \(httpResponse.statusCode)", level: .info) }
+    
+    guard let html = String(data: data, encoding: .utf8) else {
+        await MainActor.run { LogManager.shared.add("网页编码不是UTF-8", level: .error) }
+        throw NSError(domain: "Detect", code: 1, userInfo: [NSLocalizedDescriptionKey: "无法解析HTML"])
+    }
+    await MainActor.run { LogManager.shared.add("HTML长度: \(html.count) 字符", level: .debug) }
+    
+    let doc = try SwiftSoup.parse(html)
+    let forms = try doc.select("form")
+    await MainActor.run { LogManager.shared.add("找到 \(forms.count) 个表单", level: .info) }
+    
+    for (index, form) in forms.enumerated() {
+        // 查找所有文本输入框（不要求有 name）
+        let textInputs = try form.select("input[type=text], input[type=search], textarea")
+        guard let firstTextInput = textInputs.first() else {
+            await MainActor.run { LogManager.shared.add("表单 \(index+1) 没有文本输入框，跳过", level: .warning) }
+            continue
         }
-        await MainActor.run { LogManager.shared.add("响应状态码: \(httpResponse.statusCode)", level: .info) }
         
-        guard let html = String(data: data, encoding: .utf8) else {
-            await MainActor.run { LogManager.shared.add("网页编码不是UTF-8", level: .error) }
-            throw NSError(domain: "Detect", code: 1, userInfo: [NSLocalizedDescriptionKey: "无法解析HTML"])
+        // 获取关键词字段名（优先 name，其次 id）
+        var keywordName = try firstTextInput.attr("name")
+        if keywordName.isEmpty {
+            keywordName = try firstTextInput.attr("id")
         }
-        await MainActor.run { LogManager.shared.add("HTML长度: \(html.count) 字符", level: .debug) }
+        guard !keywordName.isEmpty else {
+            await MainActor.run { LogManager.shared.add("表单 \(index+1) 文本输入框无 name 或 id，跳过", level: .warning) }
+            continue
+        }
         
-        let doc = try SwiftSoup.parse(html)
-        let forms = try doc.select("form")
-        await MainActor.run { LogManager.shared.add("找到 \(forms.count) 个表单", level: .info) }
+        let action = try form.attr("action")
+        let method = try form.attr("method").uppercased() == "POST" ? "POST" : "GET"
         
-        for (index, form) in forms.enumerated() {
-            // 优先查找文本输入框（有 name 属性）
-            let textInputs = try form.select("input[type=text][name], input[type=search][name], textarea[name]")
-            var keywordInput: Element? = nil
-            var keywordName: String? = nil
-            
-            if let first = textInputs.first() {
-                keywordInput = first
-                keywordName = try first.attr("name")
+        // 构建完整 action URL
+        var fullAction = action
+        if !action.hasPrefix("http") {
+            if action.hasPrefix("/") {
+                fullAction = (url.scheme ?? "https") + "://" + (url.host ?? "") + action
             } else {
-                // 没有文本输入框，查找第一个有 name 的输入框（可能是下拉框、隐藏字段等）
-                let allNamed = try form.select("input[name], select[name], textarea[name]")
-                if let first = allNamed.first() {
-                    keywordInput = first
-                    keywordName = try first.attr("name")
+                let base = url.absoluteString.hasSuffix("/") ? url.absoluteString : url.absoluteString + "/"
+                fullAction = base + action
+            }
+        }
+        
+        var bodyTemplate: String? = nil
+        if method == "POST" {
+            var params: [String] = []
+            // 收集所有 input、textarea 和 select（带 name 或 id 的）
+            let allInputs = try form.select("input, textarea, select")
+            for input in allInputs {
+                let tagName = input.tagName()
+                var name = try input.attr("name")
+                if name.isEmpty && (tagName == "input" || tagName == "textarea") {
+                    name = try input.attr("id")  // 无 name 时用 id 作为后备
                 }
-            }
-            
-            guard let inputName = keywordName, !inputName.isEmpty else {
-                await MainActor.run { LogManager.shared.add("表单 \(index+1) 没有找到合适的输入字段，跳过", level: .warning) }
-                continue
-            }
-            
-            let action = try form.attr("action")
-            let method = try form.attr("method").uppercased() == "POST" ? "POST" : "GET"
-            
-            // 构建完整 action URL
-            var fullAction = action
-            if !action.hasPrefix("http") {
-                if action.hasPrefix("/") {
-                    fullAction = (url.scheme ?? "https") + "://" + (url.host ?? "") + action
-                } else {
-                    let base = url.absoluteString.hasSuffix("/") ? url.absoluteString : url.absoluteString + "/"
-                    fullAction = base + action
-                }
-            }
-            
-            var bodyTemplate: String? = nil
-            if method == "POST" {
-                var params: [String] = []
-                let allInputs = try form.select("input, textarea, select")
-                for input in allInputs {
-                    let name = try input.attr("name")
-                    let value = try input.attr("value")
-                    if !name.isEmpty {
-                        if name == inputName {
-                            params.append("\(name)=%@")
-                        } else {
-                            let val = value.isEmpty ? "" : value
-                            params.append("\(name)=\(val)")
-                        }
+                guard !name.isEmpty else { continue }
+                
+                var value = try input.attr("value")
+                if value.isEmpty && tagName == "select" {
+                    // 对于 select，取第一个 option 的 value
+                    let options = try input.select("option")
+                    if let firstOption = options.first() {
+                        value = try firstOption.attr("value")
                     }
                 }
-                bodyTemplate = params.joined(separator: "&")
-            } else {
-                bodyTemplate = inputName
+                
+                if input == firstTextInput {
+                    params.append("\(name)=%@")   // 关键词字段用 %@ 占位
+                } else {
+                    params.append("\(name)=\(value)")
+                }
             }
-            
-            await MainActor.run {
-                LogManager.shared.add("✅ 成功探测表单 \(index+1): 方法=\(method), 关键词字段=\(inputName)", level: .success)
-                LogManager.shared.add("Action URL: \(fullAction)", level: .debug)
-                LogManager.shared.add("Body模板: \(bodyTemplate ?? "")", level: .debug)
-            }
-            
-            let rule = Rule(
-                name: url.host ?? "未知",
-                type: "novel",
-                baseURL: url.absoluteString.hasSuffix("/") ? url.absoluteString : url.absoluteString + "/",
-                searchRule: SearchRule(
-                    url: fullAction,
-                    method: method,
-                    body: bodyTemplate,
-                    list: ".result-list .item, .search-list .item, ul.list li, .book-list li",
-                    title: "h3 a, .book-title a, .name a, a.title",
-                    urlAttr: "a@href"
-                ),
-                chapterRule: ChapterRule(
-                    list: "#list dd a, .chapter-list a",
-                    title: "a",
-                    urlAttr: "a@href"
-                ),
-                contentRule: ContentRule(
-                    selector: "#content, .article-content",
-                    text: "text"
-                ),
-                discover: nil
-            )
-            return rule
+            bodyTemplate = params.joined(separator: "&")
+        } else {
+            bodyTemplate = keywordName
         }
         
-        await MainActor.run { LogManager.shared.add("未找到任何可用的搜索表单", level: .error) }
-        throw NSError(domain: "Detect", code: 2, userInfo: [NSLocalizedDescriptionKey: "未找到搜索表单"])
+        await MainActor.run {
+            LogManager.shared.add("✅ 成功探测表单 \(index+1): 方法=\(method), 关键词字段=\(keywordName)", level: .success)
+            LogManager.shared.add("Action URL: \(fullAction)", level: .debug)
+            LogManager.shared.add("Body模板: \(bodyTemplate ?? "")", level: .debug)
+        }
+        
+        let rule = Rule(
+            name: url.host ?? "未知",
+            type: "novel",
+            baseURL: url.absoluteString.hasSuffix("/") ? url.absoluteString : url.absoluteString + "/",
+            searchRule: SearchRule(
+                url: fullAction,
+                method: method,
+                body: bodyTemplate,
+                list: ".result-list .item, .search-list .item, ul.list li, .book-list li",
+                title: "h3 a, .book-title a, .name a, a.title",
+                urlAttr: "a@href"
+            ),
+            chapterRule: ChapterRule(
+                list: "#list dd a, .chapter-list a",
+                title: "a",
+                urlAttr: "a@href"
+            ),
+            contentRule: ContentRule(
+                selector: "#content, .article-content",
+                text: "text"
+            ),
+            discover: nil
+        )
+        return rule
     }
+    
+    await MainActor.run { LogManager.shared.add("未找到任何可用的搜索表单", level: .error) }
+    throw NSError(domain: "Detect", code: 2, userInfo: [NSLocalizedDescriptionKey: "未找到搜索表单"])
+}
     
     private func testLatency(for source: Source) {
         guard let ruleData = source.ruleData,
