@@ -46,7 +46,6 @@ struct AggregateSearchView: View {
                                 }
                             }
                         } else if resultsBySource[source.objectID] == nil {
-                            // 尚未搜索该源，不显示
                             EmptyView()
                         } else {
                             Section(header: Text(source.name ?? "未知源")) {
@@ -106,6 +105,5 @@ struct AggregateSearchView: View {
         book.currentChapter = 0
         book.progress = 0
         try? viewContext.save()
-        // 可选：显示提示
     }
 }
