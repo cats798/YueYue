@@ -156,6 +156,7 @@ class SearchService {
         }
         
         // 调试信息（可在Xcode控制台查看）
+        print("=== 搜索请求 ===")
         print("请求方法: \(request.httpMethod ?? "")")
         print("请求 URL: \(request.url?.absoluteString ?? "")")
         if let body = request.httpBody, let bodyStr = String(data: body, encoding: .utf8) {
