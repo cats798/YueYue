@@ -115,17 +115,13 @@ struct SourceManagerView: View {
         
         Task {
             do {
-                let (searchInfo, html) = try await detectSearchForm(from: url)
+                let rule = try await detectSearchForm(from: url)
+                let ruleData = try JSONEncoder().encode(rule)
                 await MainActor.run {
                     let newSource = Source(context: viewContext)
                     newSource.name = url.host ?? "未知源"
-                    newSource.type = "novel"
-                    newSource.searchURL = searchInfo.url
-                    newSource.searchMethod = searchInfo.method
-                    newSource.searchBody = searchInfo.bodyTemplate
-                    newSource.listSelector = searchInfo.listSelector
-                    newSource.titleSelector = searchInfo.titleSelector
-                    newSource.linkSelector = searchInfo.linkSelector
+                    newSource.type = rule.type
+                    newSource.ruleData = ruleData
                     
                     do {
                         try viewContext.save()
@@ -143,8 +139,8 @@ struct SourceManagerView: View {
         }
     }
     
-    // 探测搜索表单
-    private func detectSearchForm(from url: URL) async throws -> (url: String, method: String, bodyTemplate: String?, listSelector: String, titleSelector: String, linkSelector: String) {
+    // 自动探测搜索表单并生成完整规则
+    private func detectSearchForm(from url: URL) async throws -> Rule {
         let (data, _) = try await URLSession.shared.data(from: url)
         guard let html = String(data: data, encoding: .utf8) else {
             throw NSError(domain: "Detect", code: 1, userInfo: [NSLocalizedDescriptionKey: "无法解析HTML"])
@@ -159,7 +155,6 @@ struct SourceManagerView: View {
                 let action = try form.attr("action")
                 let method = try form.attr("method").uppercased() == "POST" ? "POST" : "GET"
                 let inputName = try firstInput.attr("name")
-                let baseURL = url.absoluteString.hasSuffix("/") ? url.absoluteString : url.absoluteString + "/"
                 let fullAction = URL(string: action, relativeTo: url)?.absoluteString ?? action
                 
                 var bodyTemplate: String? = nil
@@ -176,28 +171,45 @@ struct SourceManagerView: View {
                         }
                     }
                     bodyTemplate = params.joined(separator: "&")
-                } else {
-                    // GET 请求，bodyTemplate 存储参数名
-                    bodyTemplate = inputName
                 }
                 
-                // 默认选择器（可后续手动编辑）
-                let listSelector = ".result-list .item, .search-list .item"
-                let titleSelector = "h3 a, .book-title a"
-                let linkSelector = "a@href"
-                
-                return (fullAction, method, bodyTemplate, listSelector, titleSelector, linkSelector)
+                // 构建规则（章节和内容选择器使用常见默认值）
+                let rule = Rule(
+                    name: url.host ?? "未知",
+                    type: "novel",
+                    baseURL: url.absoluteString.hasSuffix("/") ? url.absoluteString : url.absoluteString + "/",
+                    searchRule: SearchRule(
+                        url: fullAction,
+                        method: method,
+                        body: bodyTemplate,
+                        list: ".result-list .item, .search-list .item",
+                        title: "h3 a, .book-title a",
+                        urlAttr: "a@href"
+                    ),
+                    chapterRule: ChapterRule(
+                        list: "#list dd a",
+                        title: "a",
+                        urlAttr: "a@href"
+                    ),
+                    contentRule: ContentRule(
+                        selector: "#content",
+                        text: "text"
+                    ),
+                    discover: nil
+                )
+                return rule
             }
         }
         throw NSError(domain: "Detect", code: 2, userInfo: [NSLocalizedDescriptionKey: "未找到搜索表单"])
     }
     
     private func testLatency(for source: Source) {
-        guard let baseURL = source.searchURL else {
+        guard let ruleData = source.ruleData,
+              let rule = try? JSONDecoder().decode(Rule.self, from: ruleData),
+              let url = URL(string: rule.baseURL) else {
             alertMessage = "无法获取源地址"
             return
         }
-        guard let url = URL(string: baseURL) else { return }
         testingSourceID = source.objectID
         
         Task {
