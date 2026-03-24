@@ -74,17 +74,12 @@ struct SearchView: View {
     }
     
     private func search() {
-        guard let ruleData = source.ruleData,
-              let rule = try? JSONDecoder().decode(Rule.self, from: ruleData) else {
-            errorMessage = "源规则无效"
-            return
-        }
         isLoading = true
         errorMessage = nil
         debugHtml = nil
         Task {
             do {
-                let (results, html) = try await SearchService.searchWithHtml(keyword: keyword, rule: rule)
+                let (results, html) = try await SearchService.searchWithHtml(keyword: keyword, source: source)
                 await MainActor.run {
                     searchResults = results
                     isLoading = false
@@ -127,60 +122,53 @@ struct SearchResult: Identifiable {
 }
 
 class SearchService {
-    static func searchWithHtml(keyword: String, rule: Rule) async throws -> ([SearchResult], String) {
+    static func searchWithHtml(keyword: String, source: Source) async throws -> ([SearchResult], String) {
+        guard let searchURLString = source.searchURL,
+              let method = source.searchMethod?.uppercased() else {
+            throw NSError(domain: "Search", code: 1, userInfo: [NSLocalizedDescriptionKey: "源未配置搜索URL"])
+        }
+        
         let encodedKeyword = keyword.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
         
-        guard let baseURL = URL(string: rule.baseURL) else {
-            throw URLError(.badURL)
+        var request: URLRequest
+        if method == "POST", let bodyTemplate = source.searchBody {
+            let bodyString = bodyTemplate.replacingOccurrences(of: "%@", with: encodedKeyword)
+            guard let url = URL(string: searchURLString) else { throw URLError(.badURL) }
+            request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.httpBody = bodyString.data(using: .utf8)
+            request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        } else {
+            // GET
+            let paramName = source.searchBody ?? "q"
+            let fullURLString = searchURLString + (searchURLString.contains("?") ? "&" : "?") + "\(paramName)=\(encodedKeyword)"
+            guard let url = URL(string: fullURLString) else { throw URLError(.badURL) }
+            request = URLRequest(url: url)
+            request.httpMethod = "GET"
         }
-        let searchURL = baseURL.appendingPathComponent(rule.searchRule.url)
         
-        var request = URLRequest(url: searchURL)
-        request.httpMethod = rule.searchRule.method?.uppercased() ?? "GET"
-        
-        // 添加更真实的浏览器请求头
+        // 添加真实浏览器头
         request.setValue("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
         request.setValue("text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8", forHTTPHeaderField: "Accept")
         request.setValue("zh-CN,zh;q=0.9,en;q=0.8", forHTTPHeaderField: "Accept-Language")
-        request.setValue(baseURL.absoluteString, forHTTPHeaderField: "Referer")
-        request.setValue("keep-alive", forHTTPHeaderField: "Connection")
         
-        if request.httpMethod == "POST", let bodyTemplate = rule.searchRule.body {
-            let bodyString = bodyTemplate.replacingOccurrences(of: "%@", with: encodedKeyword)
-            request.httpBody = bodyString.data(using: .utf8)
-            request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        }
-        
-        // 调试输出（可在Xcode控制台查看）
-        print("Search URL: \(request.url?.absoluteString ?? "")")
-        print("Method: \(request.httpMethod ?? "")")
-        if let body = request.httpBody, let bodyStr = String(data: body, encoding: .utf8) {
-            print("Body: \(bodyStr)")
-        }
-        
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw URLError(.badServerResponse)
-        }
-        print("Status: \(httpResponse.statusCode)")
-        
-        // 如果重定向，打印位置
-        if let location = httpResponse.allHeaderFields["Location"] as? String {
-            print("Redirect to: \(location)")
-        }
-        
+        let (data, _) = try await URLSession.shared.data(for: request)
         guard let html = String(data: data, encoding: .utf8) else {
-            throw NSError(domain: "SearchService", code: 1, userInfo: [NSLocalizedDescriptionKey: "网页编码不是 UTF-8"])
+            throw NSError(domain: "Search", code: 2, userInfo: [NSLocalizedDescriptionKey: "网页编码不是 UTF-8"])
         }
         
-        // 解析
         let doc = try SwiftSoup.parse(html)
-        let elements = try doc.select(rule.searchRule.list)
+        let listSelector = source.listSelector ?? ".result-list .item, .search-list .item"
+        let titleSelector = source.titleSelector ?? "h3 a, .book-title a"
+        let linkSelector = source.linkSelector ?? "a@href"
+        
+        let elements = try doc.select(listSelector)
         var results: [SearchResult] = []
         for element in elements {
-            let titleElem = try element.select(rule.searchRule.title).first()
+            let titleElem = try element.select(titleSelector).first()
             let title = try titleElem?.text() ?? ""
-            let href = try titleElem?.attr(rule.searchRule.urlAttr) ?? ""
+            let href = try titleElem?.attr(linkSelector) ?? ""
+            let baseURL = source.searchURL.flatMap { URL(string: $0)?.deletingLastPathComponent() }
             let fullUrl = URL(string: href, relativeTo: baseURL)?.absoluteString ?? href
             if !title.isEmpty && !fullUrl.isEmpty {
                 results.append(SearchResult(title: title, url: fullUrl, author: nil, coverData: nil))
