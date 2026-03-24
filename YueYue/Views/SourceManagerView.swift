@@ -148,24 +148,42 @@ struct SourceManagerView: View {
         let doc = try SwiftSoup.parse(html)
         let forms = try doc.select("form")
         for form in forms {
-            let inputs = try form.select("input[type=text], input[type=search]")
-            if let firstInput = inputs.first() {
+            let textInputs = try form.select("input[type=text], input[type=search]")
+            if let firstTextInput = textInputs.first() {
                 let action = try form.attr("action")
                 let method = try form.attr("method").uppercased() == "POST" ? "POST" : "GET"
-                let inputName = try firstInput.attr("name")
-                let fullAction = URL(string: action, relativeTo: url)?.absoluteString ?? action
+                let inputName = try firstTextInput.attr("name")
+                
+                // 构建完整 action URL
+                var fullAction = action
+                if !action.hasPrefix("http") {
+                    let baseURLString = url.absoluteString
+                    if baseURLString.hasSuffix("/") {
+                        fullAction = baseURLString + action
+                    } else {
+                        if action.hasPrefix("/") {
+                            let baseWithoutPath = URL(string: "/", relativeTo: url)?.absoluteString ?? ""
+                            fullAction = baseWithoutPath + action
+                        } else {
+                            fullAction = baseURLString + "/" + action
+                        }
+                    }
+                }
                 
                 var bodyTemplate: String? = nil
                 if method == "POST" {
                     var params: [String] = []
+                    // 收集所有 input 字段（包括隐藏）
                     let allInputs = try form.select("input")
                     for input in allInputs {
                         let name = try input.attr("name")
                         let value = try input.attr("value")
-                        if name == inputName {
-                            params.append("\(name)=%@")
-                        } else if !name.isEmpty {
-                            params.append("\(name)=\(value)")
+                        if !name.isEmpty {
+                            if name == inputName {
+                                params.append("\(name)=%@")
+                            } else {
+                                params.append("\(name)=\(value)")
+                            }
                         }
                     }
                     bodyTemplate = params.joined(separator: "&")
