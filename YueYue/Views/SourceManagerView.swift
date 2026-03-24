@@ -18,6 +18,9 @@ struct SourceManagerView: View {
     @State private var quickURL = ""
     @State private var alertMessage: String? = nil
     @State private var testingSourceID: NSManagedObjectID? = nil
+    @State private var showLogView = false
+    
+    @ObservedObject private var logManager = LogManager.shared
     
     var body: some View {
         List {
@@ -68,6 +71,7 @@ struct SourceManagerView: View {
                 Menu {
                     Button("快速添加（网址）") { showQuickAdd = true }
                     Button("手动添加 JSON") { showAddSource = true }
+                    Button("查看日志") { showLogView = true }
                 } label: {
                     Image(systemName: "plus")
                 }
@@ -94,6 +98,9 @@ struct SourceManagerView: View {
                     }
                 }
             }
+        }
+        .sheet(isPresented: $showLogView) {
+            LogView()
         }
         .alert(item: $alertMessage) { message in
             Alert(title: Text("提示"), message: Text(message), dismissButton: .default(Text("确定")))
@@ -133,21 +140,33 @@ struct SourceManagerView: View {
                 }
             } catch {
                 await MainActor.run {
-                    alertMessage = "自动探测失败：\(error.localizedDescription)\n请稍后再试或联系开发者"
+                    alertMessage = "自动探测失败：\(error.localizedDescription)\n请查看日志获取详情"
                 }
             }
         }
     }
     
     private func detectSearchForm(from url: URL) async throws -> Rule {
-        let (data, _) = try await URLSession.shared.data(from: url)
+        LogManager.shared.add("开始探测源: \(url.absoluteString)", level: .info)
+        
+        let (data, response) = try await URLSession.shared.data(from: url)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            LogManager.shared.add("无效的HTTP响应", level: .error)
+            throw NSError(domain: "Detect", code: 1, userInfo: [NSLocalizedDescriptionKey: "无效的HTTP响应"])
+        }
+        LogManager.shared.add("响应状态码: \(httpResponse.statusCode)", level: .info)
+        
         guard let html = String(data: data, encoding: .utf8) else {
+            LogManager.shared.add("网页编码不是UTF-8", level: .error)
             throw NSError(domain: "Detect", code: 1, userInfo: [NSLocalizedDescriptionKey: "无法解析HTML"])
         }
+        LogManager.shared.add("HTML长度: \(html.count) 字符", level: .debug)
         
         let doc = try SwiftSoup.parse(html)
         let forms = try doc.select("form")
-        for form in forms {
+        LogManager.shared.add("找到 \(forms.count) 个表单", level: .info)
+        
+        for (index, form) in forms.enumerated() {
             // 优先查找文本输入框（有 name 属性）
             var textInputs = try form.select("input[type=text][name], input[type=search][name], textarea[name]")
             var keywordInput: Element? = nil
@@ -166,7 +185,8 @@ struct SourceManagerView: View {
             }
             
             guard let inputName = keywordName, !inputName.isEmpty else {
-                continue // 没有找到任何候选，跳过此表单
+                LogManager.shared.add("表单 \(index+1) 没有找到合适的输入字段，跳过", level: .warning)
+                continue
             }
             
             let action = try form.attr("action")
@@ -186,17 +206,14 @@ struct SourceManagerView: View {
             var bodyTemplate: String? = nil
             if method == "POST" {
                 var params: [String] = []
-                // 收集所有 input 和 textarea 字段（包括隐藏）
                 let allInputs = try form.select("input, textarea, select")
                 for input in allInputs {
                     let name = try input.attr("name")
                     let value = try input.attr("value")
                     if !name.isEmpty {
                         if name == inputName {
-                            // 关键词字段，用 %@ 占位
                             params.append("\(name)=%@")
                         } else {
-                            // 其他字段，使用默认值（如果没有 value，使用空字符串）
                             let val = value.isEmpty ? "" : value
                             params.append("\(name)=\(val)")
                         }
@@ -207,12 +224,9 @@ struct SourceManagerView: View {
                 bodyTemplate = inputName
             }
             
-            // 调试输出（在Xcode控制台查看）
-            print("=== 探测到表单 ===")
-            print("Action: \(fullAction)")
-            print("Method: \(method)")
-            print("Body模板: \(bodyTemplate ?? "")")
-            print("关键词字段名: \(inputName)")
+            LogManager.shared.add("✅ 成功探测表单 \(index+1): 方法=\(method), 关键词字段=\(inputName)", level: .success)
+            LogManager.shared.add("Action URL: \(fullAction)", level: .debug)
+            LogManager.shared.add("Body模板: \(bodyTemplate ?? "")", level: .debug)
             
             let rule = Rule(
                 name: url.host ?? "未知",
@@ -239,6 +253,8 @@ struct SourceManagerView: View {
             )
             return rule
         }
+        
+        LogManager.shared.add("未找到任何可用的搜索表单", level: .error)
         throw NSError(domain: "Detect", code: 2, userInfo: [NSLocalizedDescriptionKey: "未找到搜索表单"])
     }
     
@@ -273,6 +289,64 @@ struct SourceManagerView: View {
                 await MainActor.run {
                     testingSourceID = nil
                     alertMessage = "连接失败：\(error.localizedDescription)"
+                }
+            }
+        }
+    }
+}
+
+// 日志查看视图
+struct LogView: View {
+    @ObservedObject private var logManager = LogManager.shared
+    @State private var exportText = ""
+    @State private var showExportSheet = false
+    
+    var body: some View {
+        NavigationView {
+            List(logManager.logs) { entry in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(entry.message)
+                        .font(.system(.body, design: .monospaced))
+                    Text(entry.timestamp.formatted())
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+                .listRowBackground(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.gray.opacity(0.1))
+                        .padding(.vertical, 2)
+                )
+            }
+            .navigationTitle("日志")
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("清除") {
+                        logManager.clear()
+                    }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("导出") {
+                        exportText = logManager.export()
+                        showExportSheet = true
+                    }
+                }
+            }
+            .sheet(isPresented: $showExportSheet) {
+                NavigationView {
+                    TextEditor(text: .constant(exportText))
+                        .font(.system(.body, design: .monospaced))
+                        .padding()
+                        .navigationTitle("日志导出")
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) {
+                                Button("关闭") { showExportSheet = false }
+                            }
+                            ToolbarItem(placement: .navigationBarTrailing) {
+                                Button("复制") {
+                                    UIPasteboard.general.string = exportText
+                                }
+                            }
+                        }
                 }
             }
         }
