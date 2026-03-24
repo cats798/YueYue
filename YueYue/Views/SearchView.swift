@@ -128,6 +128,24 @@ struct SearchResult: Identifiable {
 
 class SearchService {
     static func searchWithHtml(keyword: String, rule: Rule) async throws -> ([SearchResult], String) {
+        LogManager.shared.add("开始搜索: \(keyword), 源: \(rule.name)", level: .info)
+        // ... 原有代码 ...
+        // 在发送请求前记录请求信息
+        LogManager.shared.add("请求方法: \(request.httpMethod ?? "")", level: .debug)
+        LogManager.shared.add("请求 URL: \(request.url?.absoluteString ?? "")", level: .debug)
+        if let body = request.httpBody, let bodyStr = String(data: body, encoding: .utf8) {
+            LogManager.shared.add("请求 Body: \(bodyStr)", level: .debug)
+        }
+        // 响应后记录状态码
+        LogManager.shared.add("响应状态码: \(httpResponse.statusCode)", level: .info)
+        // 解析结果后记录结果数量
+        LogManager.shared.add("找到 \(results.count) 个结果", level: .info)
+        // ...
+    }
+}
+
+class SearchService {
+    static func searchWithHtml(keyword: String, rule: Rule) async throws -> ([SearchResult], String) {
         let encodedKeyword = keyword.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
         guard let baseURL = URL(string: rule.baseURL) else {
             throw URLError(.badURL)
