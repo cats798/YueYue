@@ -15,8 +15,7 @@ struct BookshelfView: View {
     
     var body: some View {
         NavigationStack(path: $navigationPath) {
-            ScrollView {
-                if books.isEmpty {
+            ScrollView(.vertical, showsIndicators: true) {
                     VStack(spacing: 20) {
                         Image(systemName: "books.vertical")
                             .font(.system(size: 60))
