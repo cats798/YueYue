@@ -139,7 +139,6 @@ struct SourceManagerView: View {
         }
     }
     
-    // 自动探测搜索表单并生成完整规则
     private func detectSearchForm(from url: URL) async throws -> Rule {
         let (data, _) = try await URLSession.shared.data(from: url)
         guard let html = String(data: data, encoding: .utf8) else {
@@ -147,7 +146,6 @@ struct SourceManagerView: View {
         }
         
         let doc = try SwiftSoup.parse(html)
-        // 查找第一个包含文本输入框的 form 元素
         let forms = try doc.select("form")
         for form in forms {
             let inputs = try form.select("input[type=text], input[type=search]")
@@ -171,9 +169,10 @@ struct SourceManagerView: View {
                         }
                     }
                     bodyTemplate = params.joined(separator: "&")
+                } else {
+                    bodyTemplate = inputName
                 }
                 
-                // 构建规则（章节和内容选择器使用常见默认值）
                 let rule = Rule(
                     name: url.host ?? "未知",
                     type: "novel",
@@ -182,17 +181,17 @@ struct SourceManagerView: View {
                         url: fullAction,
                         method: method,
                         body: bodyTemplate,
-                        list: ".result-list .item, .search-list .item",
-                        title: "h3 a, .book-title a",
+                        list: ".result-list .item, .search-list .item, ul.list li, .book-list li",
+                        title: "h3 a, .book-title a, .name a, a.title",
                         urlAttr: "a@href"
                     ),
                     chapterRule: ChapterRule(
-                        list: "#list dd a",
+                        list: "#list dd a, .chapter-list a",
                         title: "a",
                         urlAttr: "a@href"
                     ),
                     contentRule: ContentRule(
-                        selector: "#content",
+                        selector: "#content, .article-content",
                         text: "text"
                     ),
                     discover: nil
@@ -240,7 +239,6 @@ struct SourceManagerView: View {
     }
 }
 
-// 用于 Alert 的扩展
 extension String: @retroactive Identifiable {
     public var id: String { self }
 }
