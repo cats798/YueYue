@@ -147,28 +147,28 @@ struct SourceManagerView: View {
     }
     
     private func detectSearchForm(from url: URL) async throws -> Rule {
-        LogManager.shared.add("开始探测源: \(url.absoluteString)", level: .info)
+        await MainActor.run { LogManager.shared.add("开始探测源: \(url.absoluteString)", level: .info) }
         
         let (data, response) = try await URLSession.shared.data(from: url)
         guard let httpResponse = response as? HTTPURLResponse else {
-            LogManager.shared.add("无效的HTTP响应", level: .error)
+            await MainActor.run { LogManager.shared.add("无效的HTTP响应", level: .error) }
             throw NSError(domain: "Detect", code: 1, userInfo: [NSLocalizedDescriptionKey: "无效的HTTP响应"])
         }
-        LogManager.shared.add("响应状态码: \(httpResponse.statusCode)", level: .info)
+        await MainActor.run { LogManager.shared.add("响应状态码: \(httpResponse.statusCode)", level: .info) }
         
         guard let html = String(data: data, encoding: .utf8) else {
-            LogManager.shared.add("网页编码不是UTF-8", level: .error)
+            await MainActor.run { LogManager.shared.add("网页编码不是UTF-8", level: .error) }
             throw NSError(domain: "Detect", code: 1, userInfo: [NSLocalizedDescriptionKey: "无法解析HTML"])
         }
-        LogManager.shared.add("HTML长度: \(html.count) 字符", level: .debug)
+        await MainActor.run { LogManager.shared.add("HTML长度: \(html.count) 字符", level: .debug) }
         
         let doc = try SwiftSoup.parse(html)
         let forms = try doc.select("form")
-        LogManager.shared.add("找到 \(forms.count) 个表单", level: .info)
+        await MainActor.run { LogManager.shared.add("找到 \(forms.count) 个表单", level: .info) }
         
         for (index, form) in forms.enumerated() {
             // 优先查找文本输入框（有 name 属性）
-            var textInputs = try form.select("input[type=text][name], input[type=search][name], textarea[name]")
+            let textInputs = try form.select("input[type=text][name], input[type=search][name], textarea[name]")
             var keywordInput: Element? = nil
             var keywordName: String? = nil
             
@@ -185,7 +185,7 @@ struct SourceManagerView: View {
             }
             
             guard let inputName = keywordName, !inputName.isEmpty else {
-                LogManager.shared.add("表单 \(index+1) 没有找到合适的输入字段，跳过", level: .warning)
+                await MainActor.run { LogManager.shared.add("表单 \(index+1) 没有找到合适的输入字段，跳过", level: .warning) }
                 continue
             }
             
@@ -224,9 +224,11 @@ struct SourceManagerView: View {
                 bodyTemplate = inputName
             }
             
-            LogManager.shared.add("✅ 成功探测表单 \(index+1): 方法=\(method), 关键词字段=\(inputName)", level: .success)
-            LogManager.shared.add("Action URL: \(fullAction)", level: .debug)
-            LogManager.shared.add("Body模板: \(bodyTemplate ?? "")", level: .debug)
+            await MainActor.run {
+                LogManager.shared.add("✅ 成功探测表单 \(index+1): 方法=\(method), 关键词字段=\(inputName)", level: .success)
+                LogManager.shared.add("Action URL: \(fullAction)", level: .debug)
+                LogManager.shared.add("Body模板: \(bodyTemplate ?? "")", level: .debug)
+            }
             
             let rule = Rule(
                 name: url.host ?? "未知",
@@ -254,7 +256,7 @@ struct SourceManagerView: View {
             return rule
         }
         
-        LogManager.shared.add("未找到任何可用的搜索表单", level: .error)
+        await MainActor.run { LogManager.shared.add("未找到任何可用的搜索表单", level: .error) }
         throw NSError(domain: "Detect", code: 2, userInfo: [NSLocalizedDescriptionKey: "未找到搜索表单"])
     }
     
