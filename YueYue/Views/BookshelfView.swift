@@ -16,13 +16,14 @@ struct BookshelfView: View {
     var body: some View {
         NavigationStack(path: $navigationPath) {
             ScrollView(.vertical, showsIndicators: true) {
+                if books.isEmpty {
                     VStack(spacing: 20) {
                         Image(systemName: "books.vertical")
                             .font(.system(size: 60))
                             .foregroundColor(.secondary)
                         Text("书架空空如也")
                             .font(.title2)
-                        Text("点击右上角 + → 聚合搜索，添加小说或漫画")
+                        Text("点击右上角 + → 搜索书籍，添加小说或漫画")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
