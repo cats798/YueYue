@@ -148,69 +148,96 @@ struct SourceManagerView: View {
         let doc = try SwiftSoup.parse(html)
         let forms = try doc.select("form")
         for form in forms {
-            let textInputs = try form.select("input[type=text], input[type=search], textarea")
-            if let firstTextInput = textInputs.first() {
-                let action = try form.attr("action")
-                let method = try form.attr("method").uppercased() == "POST" ? "POST" : "GET"
-                let inputName = try firstTextInput.attr("name")
-                
-                // 构建完整 action URL
-                var fullAction = action
-                if !action.hasPrefix("http") {
-                    if action.hasPrefix("/") {
-                        fullAction = (url.scheme ?? "https") + "://" + (url.host ?? "") + action
-                    } else {
-                        let base = url.absoluteString.hasSuffix("/") ? url.absoluteString : url.absoluteString + "/"
-                        fullAction = base + action
-                    }
+            // 优先查找文本输入框（有 name 属性）
+            var textInputs = try form.select("input[type=text][name], input[type=search][name], textarea[name]")
+            var keywordInput: Element? = nil
+            var keywordName: String? = nil
+            
+            if let first = textInputs.first() {
+                keywordInput = first
+                keywordName = try first.attr("name")
+            } else {
+                // 没有文本输入框，查找第一个有 name 的输入框（可能是下拉框、隐藏字段等）
+                let allNamed = try form.select("input[name], select[name], textarea[name]")
+                if let first = allNamed.first() {
+                    keywordInput = first
+                    keywordName = try first.attr("name")
                 }
-                
-                var bodyTemplate: String? = nil
-                if method == "POST" {
-                    var params: [String] = []
-                    // 收集所有 input 和 textarea 字段
-                    let allInputs = try form.select("input, textarea")
-                    for input in allInputs {
-                        let name = try input.attr("name")
-                        let value = try input.attr("value")
-                        if !name.isEmpty {
-                            if name == inputName {
-                                params.append("\(name)=%@")
-                            } else {
-                                params.append("\(name)=\(value)")
-                            }
+            }
+            
+            guard let inputName = keywordName, !inputName.isEmpty else {
+                continue // 没有找到任何候选，跳过此表单
+            }
+            
+            let action = try form.attr("action")
+            let method = try form.attr("method").uppercased() == "POST" ? "POST" : "GET"
+            
+            // 构建完整 action URL
+            var fullAction = action
+            if !action.hasPrefix("http") {
+                if action.hasPrefix("/") {
+                    fullAction = (url.scheme ?? "https") + "://" + (url.host ?? "") + action
+                } else {
+                    let base = url.absoluteString.hasSuffix("/") ? url.absoluteString : url.absoluteString + "/"
+                    fullAction = base + action
+                }
+            }
+            
+            var bodyTemplate: String? = nil
+            if method == "POST" {
+                var params: [String] = []
+                // 收集所有 input 和 textarea 字段（包括隐藏）
+                let allInputs = try form.select("input, textarea, select")
+                for input in allInputs {
+                    let name = try input.attr("name")
+                    let value = try input.attr("value")
+                    if !name.isEmpty {
+                        if name == inputName {
+                            // 关键词字段，用 %@ 占位
+                            params.append("\(name)=%@")
+                        } else {
+                            // 其他字段，使用默认值（如果没有 value，使用空字符串）
+                            let val = value.isEmpty ? "" : value
+                            params.append("\(name)=\(val)")
                         }
                     }
-                    bodyTemplate = params.joined(separator: "&")
-                } else {
-                    bodyTemplate = inputName
                 }
-                
-                let rule = Rule(
-                    name: url.host ?? "未知",
-                    type: "novel",
-                    baseURL: url.absoluteString.hasSuffix("/") ? url.absoluteString : url.absoluteString + "/",
-                    searchRule: SearchRule(
-                        url: fullAction,
-                        method: method,
-                        body: bodyTemplate,
-                        list: ".result-list .item, .search-list .item, ul.list li, .book-list li",
-                        title: "h3 a, .book-title a, .name a, a.title",
-                        urlAttr: "a@href"
-                    ),
-                    chapterRule: ChapterRule(
-                        list: "#list dd a, .chapter-list a",
-                        title: "a",
-                        urlAttr: "a@href"
-                    ),
-                    contentRule: ContentRule(
-                        selector: "#content, .article-content",
-                        text: "text"
-                    ),
-                    discover: nil
-                )
-                return rule
+                bodyTemplate = params.joined(separator: "&")
+            } else {
+                bodyTemplate = inputName
             }
+            
+            // 调试输出（在Xcode控制台查看）
+            print("=== 探测到表单 ===")
+            print("Action: \(fullAction)")
+            print("Method: \(method)")
+            print("Body模板: \(bodyTemplate ?? "")")
+            print("关键词字段名: \(inputName)")
+            
+            let rule = Rule(
+                name: url.host ?? "未知",
+                type: "novel",
+                baseURL: url.absoluteString.hasSuffix("/") ? url.absoluteString : url.absoluteString + "/",
+                searchRule: SearchRule(
+                    url: fullAction,
+                    method: method,
+                    body: bodyTemplate,
+                    list: ".result-list .item, .search-list .item, ul.list li, .book-list li",
+                    title: "h3 a, .book-title a, .name a, a.title",
+                    urlAttr: "a@href"
+                ),
+                chapterRule: ChapterRule(
+                    list: "#list dd a, .chapter-list a",
+                    title: "a",
+                    urlAttr: "a@href"
+                ),
+                contentRule: ContentRule(
+                    selector: "#content, .article-content",
+                    text: "text"
+                ),
+                discover: nil
+            )
+            return rule
         }
         throw NSError(domain: "Detect", code: 2, userInfo: [NSLocalizedDescriptionKey: "未找到搜索表单"])
     }
