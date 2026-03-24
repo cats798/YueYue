@@ -128,11 +128,11 @@ struct SearchResult: Identifiable {
 
 class SearchService {
     static func searchWithHtml(keyword: String, rule: Rule) async throws -> ([SearchResult], String) {
-        LogManager.shared.add("开始搜索: \(keyword), 源: \(rule.name)", level: .info)
+        await MainActor.run { LogManager.shared.add("开始搜索: \(keyword), 源: \(rule.name)", level: .info) }
         
         let encodedKeyword = keyword.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
         guard let baseURL = URL(string: rule.baseURL) else {
-            LogManager.shared.add("无效的 baseURL: \(rule.baseURL)", level: .error)
+            await MainActor.run { LogManager.shared.add("无效的 baseURL: \(rule.baseURL)", level: .error) }
             throw URLError(.badURL)
         }
         let searchURL = baseURL.appendingPathComponent(rule.searchRule.url)
@@ -159,21 +159,23 @@ class SearchService {
         }
         
         // 记录请求详情
-        LogManager.shared.add("请求方法: \(request.httpMethod ?? "")", level: .debug)
-        LogManager.shared.add("请求 URL: \(request.url?.absoluteString ?? "")", level: .debug)
-        if let body = request.httpBody, let bodyStr = String(data: body, encoding: .utf8) {
-            LogManager.shared.add("请求 Body: \(bodyStr)", level: .debug)
+        await MainActor.run {
+            LogManager.shared.add("请求方法: \(request.httpMethod ?? "")", level: .debug)
+            LogManager.shared.add("请求 URL: \(request.url?.absoluteString ?? "")", level: .debug)
+            if let body = request.httpBody, let bodyStr = String(data: body, encoding: .utf8) {
+                LogManager.shared.add("请求 Body: \(bodyStr)", level: .debug)
+            }
         }
         
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
-            LogManager.shared.add("无效的HTTP响应", level: .error)
+            await MainActor.run { LogManager.shared.add("无效的HTTP响应", level: .error) }
             throw URLError(.badServerResponse)
         }
-        LogManager.shared.add("响应状态码: \(httpResponse.statusCode)", level: .info)
+        await MainActor.run { LogManager.shared.add("响应状态码: \(httpResponse.statusCode)", level: .info) }
         
         guard let html = String(data: data, encoding: .utf8) else {
-            LogManager.shared.add("网页编码不是 UTF-8", level: .error)
+            await MainActor.run { LogManager.shared.add("网页编码不是 UTF-8", level: .error) }
             throw NSError(domain: "SearchService", code: 1, userInfo: [NSLocalizedDescriptionKey: "网页编码不是 UTF-8"])
         }
         
@@ -189,7 +191,7 @@ class SearchService {
                 results.append(SearchResult(title: title, url: fullUrl, author: nil, coverData: nil))
             }
         }
-        LogManager.shared.add("找到 \(results.count) 个搜索结果", level: .info)
+        await MainActor.run { LogManager.shared.add("找到 \(results.count) 个搜索结果", level: .info) }
         return (results, html)
     }
 }
