@@ -2,6 +2,10 @@ import SwiftUI
 import CoreData
 import SwiftSoup
 
+extension String: @retroactive Identifiable {
+    public var id: String { self }
+}
+
 extension Notification.Name {
     static let sourceAdded = Notification.Name("sourceAdded")
 }
@@ -339,8 +343,4 @@ struct LogView: View {
             }
         }
     }
-}
-
-extension String: @retroactive Identifiable {
-    public var id: String { self }
 }
