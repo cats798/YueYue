@@ -191,4 +191,5 @@ class SearchService {
     
     await MainActor.run { LogManager.shared.add("找到 \(results.count) 个结果", level: .info) }
     return (results, html)
+    }
 }
